@@ -1,4 +1,5 @@
 import numpy as np
+
 def postfilter(X, change_points):
     if len(change_points) > 0:
         change_points = detect_local_lines(X, change_points, np.pi / 90, 5)

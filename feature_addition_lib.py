@@ -28,7 +28,7 @@ if not config['DEFAULT']['feature_addition_accuracy_limit']:
     config['DEFAULT']['feature_addition_accuracy_limit'] = 0.9
 
 
-# Функция подсчета точностей при включении определенной характеристики (1 шаг)
+# calculating the cv accuracy of a feature set if you include 1 feature to current set(1 step)
 def parallel_index_check_cv(features, indices_left, index_start, data, labels, queue, model, proc_count):
     for i in range(index_start, len(indices_left), proc_count):
         index = indices_left[i]
@@ -36,7 +36,7 @@ def parallel_index_check_cv(features, indices_left, index_start, data, labels, q
         feature_copy.append(index)
         tmp_data = np.array([[x[k] for k in feature_copy] for x in data])
         accuracies = []
-        for j in range(int(config['DEFAULT'][''])):
+        for j in range(int(config['DEFAULT']['cross_val_iters_for_feature_addition'])):
             accuracies.extend(model_selection.cross_val_score(model, tmp_data, labels, cv=int(config['DEFAULT']['cross_val_cv'])))
         queue.put([np.average(accuracies), i])
 
@@ -45,7 +45,7 @@ def feature_addition_parallel(data, labels, base_features = None, n_procs = 8, b
     if breakpoint_type != 'limit' or breakpoint_type != 'accuracy':
         raise(Exception("Wrong breakpoint type, acceptable values are 'limit' and 'accuracy'"))
 
-    #the model we use is RandomForest, you can change the default parameters of it yourself to suit your problem
+    # the model we use is RandomForest, you can change the default parameters of it yourself to suit your problem
     model = RandomForestClassifier(n_estimators=int(config['DEFAULT']['NumTreesForFeatureSelection']))
 
     if base_features is None:
@@ -53,12 +53,13 @@ def feature_addition_parallel(data, labels, base_features = None, n_procs = 8, b
     else:
         feature_list = list(base_features)
 
+    # getting indices of features that are yet to be selected in final feature set
     indices_left = list(set(range(len(data[0]))) - set(feature_list))
 
     start_time = time.time()
 
     for i in range(len(indices_left)):
-        # начало шага
+        # step start
         # считаем точности, полученные при включении определенной характеристики
         processes = []
         result_queue = Queue()
@@ -70,7 +71,7 @@ def feature_addition_parallel(data, labels, base_features = None, n_procs = 8, b
         accuracies = [None] * len(indices_left)
         for k in range(len(indices_left)):
             res = result_queue.get()
-            accuracies[res[2]] = res[0]
+            accuracies[res[1]] = res[0]
 
         for p in processes:
             p.join()
@@ -89,5 +90,4 @@ def feature_addition_parallel(data, labels, base_features = None, n_procs = 8, b
         if breakpoint_type == 'accuracy':
             if accuracies[res_index] > float(config['DEFAULT']['feature_addition_accuracy_limit']):
                 break
-
     return feature_list

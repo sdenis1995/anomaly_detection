@@ -31,7 +31,7 @@ with open(config['DEFAULT']['classifier_filename'], 'rb') as f:
     interval_model = pickle.load(f)
 
 def get_interval_features(data):
-    #dummy function, returns median and oscillation rate for every dynamic characteristic
+    # dummy function, returns median and oscillation rate for every dynamic characteristic
     if len(data) == 0:
         raise Exception("Empty array is given")
     medians = np.median(data, axis=0)
@@ -40,12 +40,14 @@ def get_interval_features(data):
 
 
 def get_change_points(data):
+    # ecp relies on normalization, otherwise its decision can depend on only one or two features
     normalized_data = np.array(data)
     for l in range(len(normalized_data[0])):
         m = np.max(normalized_data[:, l])
         if m > 0.001:
             normalized_data[:, l] = normalized_data[:, l] / m
 
+    # using ecp package to get change points of this multivariate time series
     estimated = e.e_divisive(normalized_data,
                              sig_lvl=float(config['DEFAULT']['ecp_significance_level']),
                              min_size=int(config['DEFAULT']['ecp_min_cluster_size']))
@@ -60,6 +62,7 @@ def get_change_points(data):
 
     return np.unique(estimated)
 
+# get job change points and interval classes for overall job classification based on these classes
 def process_job(data, feature_selection_function = get_interval_features):
     if get_interval_features is None:
         raise(Exception("No interval feature selection function"))
