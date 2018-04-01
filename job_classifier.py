@@ -38,37 +38,66 @@ def get_interval_features(data):
     oscillation_rates = (np.max(data, axis=0)-np.min(data, axis=0))/np.average(data, axis=0)
     return np.append(medians, oscillation_rates)
 
+#dummy function for determining the class of the job based on interval classes and amount of processors that job was run on
+def get_job_class(timestamps, changepoints, interval_classes, proc_count):
+    result_class = 1
+    distribution = np.zeros((3))
+    for i in range(len(interval_classes)):
+        distribution[interval_classes[i] - 1] += (timestamps[changepoints[i + 1]] - timestamps[changepoints[i]])
+    # to convert into hours
+    distribution /=  3600
 
-def get_change_points(data):
-    # ecp relies on normalization, otherwise its decision can depend on only one or two features
-    normalized_data = np.array(data)
-    for l in range(len(normalized_data[0])):
-        m = np.max(normalized_data[:, l])
-        if m > 0.001:
-            normalized_data[:, l] = normalized_data[:, l] / m
+    # to detect if suspicious
+    if (distribution[2] * proc_count > 100) or \
+        (distribution[2] > 1) or \
+        (distribution[2] >= distribution[1] and distribution[2] >= distribution[0]):
+        result_class = 3
 
-    # using ecp package to get change points of this multivariate time series
-    estimated = e.e_divisive(normalized_data,
-                             sig_lvl=float(config['DEFAULT']['ecp_significance_level']),
-                             min_size=int(config['DEFAULT']['ecp_min_cluster_size']))
-    estimated = np.array(estimated[estimated.names.index('estimates')], dtype=np.int64)
-    estimated = estimated - 1
-    estimated[-1] -= 1
+    #to detect if abnormal
+    if (distribution[1] *proc_count > 100) or \
+        (distribution[1] > 1) or \
+        (distribution[1] >= distribution[0] and distribution[1] >= distribution[2]):
+        result_class = 2
 
-    # this part is optional, we just needed to localize change point and get him its own interval,
-    # so it wouldn't interfere with neighbouring intervals
-    estimated = postfilter(normalized_data, estimated[1:-1])
-    estimated.extend([0, len(data)])
+    return result_class
 
-    return np.unique(estimated)
+class AnomalyDetector:
+    def get_change_points(self, data):
+        # ecp relies on normalization, otherwise its decision can depend on only one or two features
+        normalized_data = np.array(data)
+        for l in range(len(normalized_data[0])):
+            m = np.max(normalized_data[:, l])
+            if m > 0.001:
+                normalized_data[:, l] = normalized_data[:, l] / m
 
-# get job change points and interval classes for overall job classification based on these classes
-def process_job(data, feature_selection_function = get_interval_features):
-    if get_interval_features is None:
-        raise(Exception("No interval feature selection function"))
-    changepoints = get_change_points(data)
-    interval_data = [None] * (len(changepoints) - 1)
-    for i in range(len(changepoints) - 1):
-        interval_data[i] = feature_selection_function(data[changepoints[i]:changepoints[i + 1]])
-    interval_classes = interval_model.fit(interval_data)
-    return changepoints, interval_classes
+        # using ecp package to get change points of this multivariate time series
+        estimated = e.e_divisive(normalized_data,
+                                 sig_lvl=float(config['DEFAULT']['ecp_significance_level']),
+                                 min_size=int(config['DEFAULT']['ecp_min_cluster_size']))
+        estimated = np.array(estimated[estimated.names.index('estimates')], dtype=np.int64)
+        estimated = estimated - 1
+        estimated[-1] -= 1
+
+        # this part is optional, we just needed to localize change point and get him its own interval,
+        # so it wouldn't interfere with neighbouring intervals
+        estimated = postfilter(normalized_data, estimated[1:-1])
+        estimated.extend([0, len(data)])
+
+        return np.unique(estimated)
+
+    # get job change points and interval classes for overall job classification based on these classes
+    def process_job(self, data, feature_selection_function = get_interval_features):
+        if get_interval_features is None:
+            raise(Exception("No interval feature selection function"))
+        changepoints = self.get_change_points(data)
+        interval_data = [None] * (len(changepoints) - 1)
+        for i in range(len(changepoints) - 1):
+            interval_data[i] = feature_selection_function(data[changepoints[i]:changepoints[i + 1]])
+        interval_classes = interval_model.fit(interval_data)
+        return changepoints, interval_classes
+
+    def predict(self, data, proc_count, timestamps, feature_selection_function = get_interval_features):
+        if get_interval_features is None:
+            raise (Exception("No interval feature selection function"))
+        changepoints, interval_classes = self.process_job(data, feature_selection_function)
+        return get_job_class(timestamps, changepoints, interval_classes, proc_count)
