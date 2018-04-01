@@ -1,6 +1,7 @@
 from functions import *
 import numpy as np
 import configparser
+from sklearn.ensemble import RandomForestClassifier
 
 #for change point detection (using ecp package for R)
 from rpy2.robjects.packages import importr
@@ -24,11 +25,13 @@ if not config['DEFAULT']['classifier_filename']:
 if not config['DEFAULT']['ecp_min_cluster_size']:
     config['DEFAULT']['ecp_min_cluster_size'] = 15
 
+if not config['DEFAULT']['NumTreesForClassifier']:
+    config['DEFAULT']['NumTreesForClassifier'] = 256
+
 if not config['DEFAULT']['ecp_significance_level']:
     config['DEFAULT']['ecp_significance_level'] = 0.05
 
-with open(config['DEFAULT']['classifier_filename'], 'rb') as f:
-    interval_model = pickle.load(f)
+
 
 def get_interval_features(data):
     # dummy function, returns median and oscillation rate for every dynamic characteristic
@@ -62,6 +65,30 @@ def get_job_class(timestamps, changepoints, interval_classes, proc_count):
     return result_class
 
 class AnomalyDetector:
+    def __init__(self):
+        self.model = RandomForestClassifier(n_estimators=int(config['DEFAULT']['NumTreesForClassifier']))
+
+    # method for fitting random forest classifier (interval classification)
+    def fit(self, data, labels):
+        # data : array of elements representing features of an interval
+        # labels : array of classes for the intervals
+        self.model.fit(data, labels)
+
+    # load RandomForest model from file (pickled)
+    def load_model(self, filename=None):
+        if filename is None:
+            filename = config['DEFAULT']['classifier_filename']
+        with open(filename, 'rb') as f:
+            self.model = pickle.load(f)
+
+    # save RandomForest model in file (using pickle)
+    def save_model(self, filename=None):
+        if filename is None:
+            filename = config['DEFAULT']['classifier_filename']
+        with open(filename, 'wb') as f:
+            pickle.dump(self.model, f)
+
+    # get change point locations in the data
     def get_change_points(self, data):
         # ecp relies on normalization, otherwise its decision can depend on only one or two features
         normalized_data = np.array(data)
@@ -86,14 +113,14 @@ class AnomalyDetector:
         return np.unique(estimated)
 
     # get job change points and interval classes for overall job classification based on these classes
-    def process_job(self, data, feature_selection_function = get_interval_features):
+    def process_job(self, data, feature_selection_function=get_interval_features):
         if get_interval_features is None:
             raise(Exception("No interval feature selection function"))
         changepoints = self.get_change_points(data)
         interval_data = [None] * (len(changepoints) - 1)
         for i in range(len(changepoints) - 1):
             interval_data[i] = feature_selection_function(data[changepoints[i]:changepoints[i + 1]])
-        interval_classes = interval_model.fit(interval_data)
+        interval_classes = self.model.predict(interval_data)
         return changepoints, interval_classes
 
     def predict(self, data, proc_count, timestamps, feature_selection_function = get_interval_features):
